@@ -423,7 +423,7 @@ pub const Codegen = struct {
                 try self.codegen_struct_def(s);
                 try self.codegen_methods(s);
             },
-            .enum_def => unreachable,
+            .enum_def => {},
             .alias => {},
         }
     }
@@ -1121,8 +1121,8 @@ pub const Codegen = struct {
 
     pub fn codegen_field_access(self: *Codegen, f_access: *ast.FieldAccessExpr, assign: bool) anyerror!llvm.LLVMValueRef {
         const target_ty = self.expr_type(f_access.target);
-        if (target_ty == .invalid)
-            return error.InvalidType;
+        if (target_ty == .invalid) return error.InvalidType;
+
         const target_type = self.compiler.sema.types.get(target_ty);
         //   Point   -> load Point from stack
         //   *Point  -> load pointer to Point from stack
@@ -1137,7 +1137,16 @@ pub const Codegen = struct {
                 struct_ty_id = p.child;
                 struct_ptr = try self.codegen_expression(f_access.target);
             },
-
+            .enum_ty => {
+                const enum_info = target_type.enum_ty;
+                for (enum_info.variants.items, 0..) |*ev, idx| {
+                    if (std.mem.eql(u8, ev.name, f_access.field.*.ident.name)) {
+                        const llvm_ty = try self.get_llvm_type_of(target_ty);
+                        return llvm.LLVMConstInt(llvm_ty, idx, 0);
+                    }
+                }
+                return error.UnknownEnumVariant;
+            },
             else => return error.InvalidFieldAccess,
         }
 
@@ -1751,6 +1760,7 @@ pub const Codegen = struct {
                 var fields = [_]llvm.LLVMTypeRef{ llvm.LLVMPointerType(ele_ty, 0), llvm.LLVMInt64TypeInContext(self.ctx) };
                 return llvm.LLVMStructTypeInContext(self.ctx, &fields, fields.len, 0);
             },
+            .enum_ty => return llvm.LLVMInt32TypeInContext(self.ctx),
             else => {
                 //todo: other typse
                 unreachable;
